@@ -66,6 +66,10 @@ static readonly bool ENBALE_BAR_STATUS_FEATURE = true;
 // Set to true if you want the welder status to be output to the LCD.
 static readonly bool ENABLE_WELDER_STATUS_FEATURE = true;
 
+// Set to true if you want the status of your projector to be output to the
+// LCD.
+static readonly bool ENABLE_PROJECTOR_STATUS_FEATURE = true;
+
 /////////////////////////////////////////////////////
 // End of configuration, no changes past this point.
 /////////////////////////////////////////////////////
@@ -99,6 +103,8 @@ IMyShipWelder buildAndRepair = null;
 
 // All other welders (doesn't include Build and Repair)
 List<IMyShipWelder> welders = new List<IMyShipWelder>();
+
+List<IMyProjector> projectors = new List<IMyProjector>();
 
 bool updateBlockStatus = false;
 public Program() {
@@ -150,7 +156,14 @@ public Program() {
         }
     }
 
-    updateBlockStatus = ENABLE_SHIELD_OUTPUT_FEATURE || ENBALE_BAR_STATUS_FEATURE || ENABLE_WELDER_STATUS_FEATURE;
+    if (ENABLE_PROJECTOR_STATUS_FEATURE) {
+        GridTerminalSystem.GetBlocksOfType(projectors, projector => projector.IsSameConstructAs(Me));
+    }
+
+    updateBlockStatus = ENABLE_SHIELD_OUTPUT_FEATURE ||
+        ENBALE_BAR_STATUS_FEATURE ||
+        ENABLE_WELDER_STATUS_FEATURE ||
+        ENABLE_PROJECTOR_STATUS_FEATURE;
 
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
 }
@@ -229,6 +242,10 @@ private bool UpdateBlockStatus() {
         UpdateWelderStatus(statusBuilder);
     }
 
+    if (ENABLE_PROJECTOR_STATUS_FEATURE) {
+        UpdateProjectorStatus(statusBuilder);
+    }
+
     shieldStatus = statusBuilder.ToString();
     bool statusChanged = oldShieldStatus != shieldStatus;
     oldShieldStatus = shieldStatus;
@@ -283,14 +300,40 @@ private void UpdateWelderStatus(StringBuilder statusBuilder) {
     }
 }
 
+private void UpdateProjectorStatus(StringBuilder statusBuilder) {
+    bool projectorOn = false;
+    bool isProjecting = false;
+    foreach (IMyProjector projector in projectors) {
+        if (projector.Enabled) {
+            projectorOn = true;
+            if (projector.IsProjecting) {
+                isProjecting = true;
+                break;
+            }
+        }
+    }
+
+    if (isProjecting) {
+        statusBuilder.Append("Projector: Projecting\n");
+    } else if (projectorOn) {
+        statusBuilder.Append("Projector: Not projecting\n");
+    } else {
+        statusBuilder.Append("Projector: Off\n");
+    }
+}
+
 string GetShieldPercent() {
     if (getShieldPercent == null || shieldController == null) {
         return "Failed to get shield percent\n";
     }
 
-    float shieldPercent = getShieldPercent.Invoke(shieldController);
+    float? shieldPercent = getShieldPercent?.Invoke(shieldController);
 
-    return $"{Math.Round(shieldPercent, 1)}%";
+    if (shieldPercent == null) {
+        return "N/A";
+    } else {
+        return $"{Math.Round((double)shieldPercent, 1)}%";
+    }
 }
 
 string GetShieldCharge() {
@@ -298,9 +341,13 @@ string GetShieldCharge() {
         return "Failed to get shield charge\n";
     }
 
-    float shieldCharge = getShieldCharge.Invoke(shieldController);
+    float? shieldCharge = getShieldCharge?.Invoke(shieldController);
 
-    return FormatNumber(shieldCharge * 100);
+    if (shieldCharge == null) {
+        return "N/A";
+    } else {
+        return FormatNumber((double)shieldCharge * 100);
+    }
 }
 
 bool lastPlayerInCockpit = true;
@@ -387,7 +434,7 @@ private void CheckBlockOwnership() {
             }
         }
 
-        if (block.OwnerId != Me.OwnerId) {
+        if (PlayerUnowned(block)) {
             if (!block.CustomName.StartsWith(UNOWNED_BLOCK_TAG)) {
                 block.CustomName = $"{UNOWNED_BLOCK_TAG}{block.CustomName}";
             }
@@ -403,6 +450,15 @@ private void CheckBlockOwnership() {
             offGrinder.Enabled = true;
         }
     }
+}
+
+private bool PlayerUnowned(IMyFunctionalBlock block) {
+    if (block is IMyLandingGear || block is IMyShipGrinder) {
+        if (block.OwnerId != Me.OwnerId) {
+            return true;
+        }
+    }
+    return false;
 }
 
 private void OutputLCD(string actionPerformed) {
