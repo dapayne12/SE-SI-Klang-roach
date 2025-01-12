@@ -63,6 +63,9 @@ static readonly string SHIELD_CONTROLLER_BLOCK_NAME = "[A] Shield Controller";
 // Set to true if you want the build and repair status to be output to the LCD.
 static readonly bool ENBALE_BAR_STATUS_FEATURE = true;
 
+// Set to true if you want the welder status to be output to the LCD.
+static readonly bool ENABLE_WELDER_STATUS_FEATURE = true;
+
 /////////////////////////////////////////////////////
 // End of configuration, no changes past this point.
 /////////////////////////////////////////////////////
@@ -93,6 +96,9 @@ Func<IMyTerminalBlock, float> getShieldPercent = null;
 Func<IMyTerminalBlock, float> getShieldCharge = null;
 
 IMyShipWelder buildAndRepair = null;
+
+// All other welders (doesn't include Build and Repair)
+List<IMyShipWelder> welders = new List<IMyShipWelder>();
 
 bool updateBlockStatus = false;
 public Program() {
@@ -131,19 +137,20 @@ public Program() {
         }
     }
 
-    if (ENBALE_BAR_STATUS_FEATURE || ENABLE_SAFE_WELDER_FEATURE) {
+    if (ENBALE_BAR_STATUS_FEATURE || ENABLE_SAFE_WELDER_FEATURE || ENABLE_WELDER_STATUS_FEATURE) {
         List<IMyShipWelder> welders = new List<IMyShipWelder>();
         GridTerminalSystem.GetBlocksOfType(welders,
             welder => welder.IsSameConstructAs(Me));
         foreach (IMyShipWelder welder in welders) {
             if (welder.DefinitionDisplayNameText == "BuildAndRepairSystem") {
                 buildAndRepair = welder;
-                break;
+            } else {
+                this.welders.Add(welder);
             }
         }
     }
 
-    updateBlockStatus = ENABLE_SHIELD_OUTPUT_FEATURE || ENBALE_BAR_STATUS_FEATURE;
+    updateBlockStatus = ENABLE_SHIELD_OUTPUT_FEATURE || ENBALE_BAR_STATUS_FEATURE || ENABLE_WELDER_STATUS_FEATURE;
 
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
 }
@@ -218,6 +225,10 @@ private bool UpdateBlockStatus() {
         UpdateBARStatus(statusBuilder);
     }
 
+    if (ENABLE_WELDER_STATUS_FEATURE) {
+        UpdateWelderStatus(statusBuilder);
+    }
+
     shieldStatus = statusBuilder.ToString();
     bool statusChanged = oldShieldStatus != shieldStatus;
     oldShieldStatus = shieldStatus;
@@ -261,6 +272,14 @@ private void UpdateBARStatus(StringBuilder statusBuilder) {
         statusBuilder.Append("BAR: On\n");
     } else {
         statusBuilder.Append("BAR: Off\n");
+    }
+}
+
+private void UpdateWelderStatus(StringBuilder statusBuilder) {
+    if (welders.Any(welder => welder.Enabled)) {
+        statusBuilder.Append("Welders: On\n");
+    } else {
+        statusBuilder.Append("Welders: Off\n");
     }
 }
 
@@ -315,7 +334,7 @@ private bool PlayerLeftCockpit() {
 }
 
 private void TurnOffWelders() {
-    List<IMyShipWelder> welders = new List<IMyShipWelder>();
+    this.welders = new List<IMyShipWelder>();
     GridTerminalSystem.GetBlocksOfType(welders,
         welder => welder.IsSameConstructAs(Me) && welder != buildAndRepair);
     foreach (IMyShipWelder welder in welders) {
