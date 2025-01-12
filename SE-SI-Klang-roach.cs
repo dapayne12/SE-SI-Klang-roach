@@ -40,17 +40,23 @@ static readonly bool ENABLE_TECH_COUNT_FEATURE = true;
 // Set to true if you want your welders to shut off when you leave the cockpit.
 static readonly bool ENABLE_SAFE_WELDER_FEATURE = true;
 
-// Set to true if you want unowned grinders to be renamed with the
-// UNOWNED_GRINDER_TAG.
-static readonly bool ENABLE_GRINDER_OWNERSHIP_FEATURE = true;
+// Set to true if you want unowned blocks to be renamed with the
+// UNOWNED_BLOCK_TAG.
+static readonly bool ENABLE_BLOCK_OWNERSHIP_FEATURE = true;
+
+// This tag will be added to the start of the name of any block that is not
+// owned by the player.
+static readonly string UNOWNED_BLOCK_TAG = "* ";
 
 // How often to run an operation. Does not include player leaving cockpit
 // check, that check is every tick. Helps reduce load on server.
-static readonly int SECONDS_BETWEEN_RUN = 20;
+static readonly int SECONDS_BETWEEN_RUN = 10;
 
-// This tag will be added to the start of the name of any grinder that is not
-// owned by the player.
-static readonly string UNOWNED_GRINDER_TAG = "* ";
+// Set to true if you want shield information to be displayed on the LCD.
+static readonly bool ENABLE_SHIELD_OUTPUT_FEATURE = true;
+
+static readonly string SHIELD_MODULATOR_BLOCK_NAME = "[A] Shield Modulator";
+static readonly string SHIELD_CONTROLLER_BLOCK_NAME = "[A] Shield Controller";
 
 /////////////////////////////////////////////////////
 // End of configuration, no changes past this point.
@@ -76,6 +82,11 @@ List<MyItemType> techTypes;
 
 List<IMyCockpit> cockpits = new List<IMyCockpit>();
 
+IMyTerminalBlock shieldModulator = null;
+IMyTerminalBlock shieldController = null;
+Func<IMyTerminalBlock, float> getShieldPercent = null;
+Func<IMyTerminalBlock, float> getShieldCharge = null;
+
 public Program() {
     techTypes = new List<MyItemType>(techCount.Keys);
 
@@ -95,20 +106,40 @@ public Program() {
 
     if (ENABLE_SAFE_WELDER_FEATURE) {
         GridTerminalSystem.GetBlocksOfType(cockpits, cockpit => cockpit.IsSameConstructAs(Me));
+    }
+
+    if (ENABLE_SHIELD_OUTPUT_FEATURE) {
+        shieldModulator = GridTerminalSystem.GetBlockWithName(SHIELD_MODULATOR_BLOCK_NAME);
+        shieldController = GridTerminalSystem.GetBlockWithName(SHIELD_CONTROLLER_BLOCK_NAME);
+
+        if (shieldController != null) {
+            ITerminalProperty<IReadOnlyDictionary<string, Delegate>> apiProperty = Me.GetProperty("DefenseSystemsPbAPI")
+                .As<IReadOnlyDictionary<string, Delegate>>();
+            if (apiProperty != null) {
+                IReadOnlyDictionary<string, Delegate> api = apiProperty.GetValue(Me);
+                getShieldPercent = (Func<IMyTerminalBlock, float>)api["GetShieldPercent"];
+                getShieldCharge = (Func<IMyTerminalBlock, float>)api["GetCharge"];
+            }
+        }
+    }
+
+    if (ENABLE_SHIELD_OUTPUT_FEATURE || ENABLE_SAFE_WELDER_FEATURE) {
         Runtime.UpdateFrequency = UpdateFrequency.Update1;
     } else {
         Runtime.UpdateFrequency = UpdateFrequency.Update100;
     }
 }
 
+DateTime updateShieldAfter = DateTime.UtcNow;
+
 private enum Operation {
     COUNT_TECH,
-    CHECK_GRINDER_OWNERSHIP
+    CHECK_BLOCK_OWNERSHIP
 }
 Operation nextOperation = Operation.COUNT_TECH;
 DateTime nextRunTime = DateTime.UtcNow;
 public void Main() {
-    string actionPerformed = null;
+    string actionPerformed;
 
     if (ENABLE_SAFE_WELDER_FEATURE && PlayerLeftCockpit()) {
         TurnOffWelders();
@@ -117,6 +148,16 @@ public void Main() {
     }
 
     DateTime now = DateTime.UtcNow;
+
+    if (ENABLE_SHIELD_OUTPUT_FEATURE && now > updateShieldAfter) {
+        updateShieldAfter = now.AddSeconds(1);
+        bool statusChanged = UpdateShieldStatus();
+        if (statusChanged) {
+            OutputLCD("Action: Updated Shield Status");
+        }
+        return;
+    }
+
     if (now >= nextRunTime) {
         nextRunTime = now.AddSeconds(SECONDS_BETWEEN_RUN);
     } else {
@@ -124,18 +165,18 @@ public void Main() {
     }
 
     if (nextOperation == Operation.COUNT_TECH) {
-        nextOperation = Operation.CHECK_GRINDER_OWNERSHIP;
+        nextOperation = Operation.CHECK_BLOCK_OWNERSHIP;
         if (ENABLE_TECH_COUNT_FEATURE) {
             CountTech();
             actionPerformed = "Action: Counted tech";
         } else {
             return;
         }
-    } else if (nextOperation == Operation.CHECK_GRINDER_OWNERSHIP) {
+    } else if (nextOperation == Operation.CHECK_BLOCK_OWNERSHIP) {
         nextOperation = Operation.COUNT_TECH;
-        if (ENABLE_GRINDER_OWNERSHIP_FEATURE) {
-            CheckGrinderOwnership();
-            actionPerformed = "Action: Checked grinder ownership";
+        if (ENABLE_BLOCK_OWNERSHIP_FEATURE) {
+            CheckBlockOwnership();
+            actionPerformed = "Action: Checked block ownership";
         } else {
             return;
         }
@@ -144,6 +185,62 @@ public void Main() {
     }
 
     OutputLCD(actionPerformed);
+}
+
+string oldShieldStatus = "";
+string shieldStatus = "\n";
+private bool UpdateShieldStatus() {
+    if (shieldModulator == null) {
+        shieldStatus = "Shield modulator not found\n\n";
+        return false;
+    }
+
+    if (shieldController == null) {
+        shieldStatus = "Shield controller not found\n\n";
+        return false;
+    }
+
+    bool entitiesMayPass = shieldModulator.GetValue<bool>("DS-M_ModulateGrids");
+    bool shieldFortified = shieldController.GetValue<Boolean>("DS-C_ShieldFortify");
+
+    StringBuilder statusBuilder = new StringBuilder();
+
+    if (!entitiesMayPass && !shieldFortified) {
+        statusBuilder.Append("Shield: Normal\n");
+    } else if (entitiesMayPass && !shieldFortified) {
+        statusBuilder.Append("Shield: Entities may pass\n");
+    } else if (!entitiesMayPass && shieldFortified) {
+        statusBuilder.Append("Shield: Fortified\n");
+    } else {
+        statusBuilder.Append("Shield: Fortified, Entities may pass\n");
+    }
+
+    statusBuilder.Append($"{GetShieldPercent()} {GetShieldCharge()}\n");
+
+    shieldStatus = statusBuilder.ToString();
+    bool statusChanged = oldShieldStatus != shieldStatus;
+    oldShieldStatus = shieldStatus;
+    return statusChanged;
+}
+
+string GetShieldPercent() {
+    if (getShieldPercent == null || shieldController == null) {
+        return "Failed to get shield percent\n";
+    }
+
+    float shieldPercent = getShieldPercent.Invoke(shieldController);
+
+    return $"{Math.Round(shieldPercent, 1)}%";
+}
+
+string GetShieldCharge() {
+    if (getShieldPercent == null || shieldController == null) {
+        return "Failed to get shield charge\n";
+    }
+
+    float shieldCharge = getShieldCharge.Invoke(shieldController);
+
+    return FormatNumber(shieldCharge * 100);
 }
 
 bool lastPlayerInCockpit = true;
@@ -210,29 +307,32 @@ private List<IMyInventory> GetInventories() {
     return inventories;
 }
 
-private void CheckGrinderOwnership() {
-    List<IMyShipGrinder> grinders = new List<IMyShipGrinder>();
-    GridTerminalSystem.GetBlocksOfType(grinders, grinder => grinder.IsSameConstructAs(Me));
+private void CheckBlockOwnership() {
+    List<IMyFunctionalBlock> blocks = new List<IMyFunctionalBlock>();
+    GridTerminalSystem.GetBlocksOfType(blocks,
+        block => block.IsSameConstructAs(Me));
 
     bool grindersOn = false;
     List<IMyShipGrinder> offGrinders = new List<IMyShipGrinder>();
 
-    foreach (IMyShipGrinder grinder in grinders) {
-        if (grinder.Enabled) {
-            grindersOn = true;
-        } else {
-            if (grinder.OwnerId == Me.OwnerId && grinder.IsFunctional) {
-                offGrinders.Add(grinder);
+    foreach (IMyFunctionalBlock block in blocks) {
+        if (block is IMyShipGrinder) {
+            if (block.Enabled) {
+                grindersOn = true;
+            } else {
+                if (block.OwnerId == Me.OwnerId && block.IsFunctional) {
+                    offGrinders.Add((IMyShipGrinder)block);
+                }
             }
         }
 
-        if (grinder.OwnerId != Me.OwnerId) {
-            if (!grinder.CustomName.StartsWith(UNOWNED_GRINDER_TAG)) {
-                grinder.CustomName = $"{UNOWNED_GRINDER_TAG}{grinder.CustomName}";
+        if (block.OwnerId != Me.OwnerId) {
+            if (!block.CustomName.StartsWith(UNOWNED_BLOCK_TAG)) {
+                block.CustomName = $"{UNOWNED_BLOCK_TAG}{block.CustomName}";
             }
         } else {
-            if (grinder.CustomName.StartsWith(UNOWNED_GRINDER_TAG)) {
-                grinder.CustomName = grinder.CustomName.Substring(UNOWNED_GRINDER_TAG.Length);
+            if (block.CustomName.StartsWith(UNOWNED_BLOCK_TAG)) {
+                block.CustomName = block.CustomName.Substring(UNOWNED_BLOCK_TAG.Length);
             }
         }
     }
@@ -260,7 +360,7 @@ private void OutputLCD(string actionPerformed) {
                 } else {
                     lcdOutput.Append(", ");
                 }
-                lcdOutput.Append($"{type.SubtypeId}: {FormatNumber(techCount[type])}");
+                lcdOutput.Append($"{type.SubtypeId}: {FormatNumber((double)techCount[type])}");
             }
             lcdOutput.Append("\n");
         }
@@ -273,16 +373,20 @@ private void OutputLCD(string actionPerformed) {
             }
         }
 
+        if (ENABLE_SHIELD_OUTPUT_FEATURE) {
+            lcdOutput.Append(shieldStatus);
+        }
+
         outputPanel.WriteText(lcdOutput);
     }
 }
 
-private string FormatNumber(MyFixedPoint number) {
+private string FormatNumber(double number) {
     if (number < 1000) {
         return $"{number}";
     } else if (number < 1000000) {
-        return $"{Math.Round((double)number / 1000, 1)}K";
+        return $"{Math.Round(number / 1000, 1)}K";
     } else {
-        return $"{Math.Round((double)number / 1000000, 1)}M";
+        return $"{Math.Round(number / 1000000, 1)}M";
     }
 }
