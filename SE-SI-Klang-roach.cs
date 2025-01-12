@@ -55,8 +55,13 @@ static readonly int SECONDS_BETWEEN_RUN = 10;
 // Set to true if you want shield information to be displayed on the LCD.
 static readonly bool ENABLE_SHIELD_OUTPUT_FEATURE = true;
 
+// Set to the name of your shield controller and shield modulator. Required for
+// SHIELD_OUTPUT_FEATURE.
 static readonly string SHIELD_MODULATOR_BLOCK_NAME = "[A] Shield Modulator";
 static readonly string SHIELD_CONTROLLER_BLOCK_NAME = "[A] Shield Controller";
+
+// Set to true if you want the build and repair status to be output to the LCD.
+static readonly bool ENBALE_BAR_STATUS_FEATURE = true;
 
 /////////////////////////////////////////////////////
 // End of configuration, no changes past this point.
@@ -87,6 +92,9 @@ IMyTerminalBlock shieldController = null;
 Func<IMyTerminalBlock, float> getShieldPercent = null;
 Func<IMyTerminalBlock, float> getShieldCharge = null;
 
+IMyShipWelder buildAndRepair = null;
+
+bool updateBlockStatus = false;
 public Program() {
     techTypes = new List<MyItemType>(techCount.Keys);
 
@@ -123,11 +131,21 @@ public Program() {
         }
     }
 
-    if (ENABLE_SHIELD_OUTPUT_FEATURE || ENABLE_SAFE_WELDER_FEATURE) {
-        Runtime.UpdateFrequency = UpdateFrequency.Update1;
-    } else {
-        Runtime.UpdateFrequency = UpdateFrequency.Update100;
+    if (ENBALE_BAR_STATUS_FEATURE || ENABLE_SAFE_WELDER_FEATURE) {
+        List<IMyShipWelder> welders = new List<IMyShipWelder>();
+        GridTerminalSystem.GetBlocksOfType(welders,
+            welder => welder.IsSameConstructAs(Me));
+        foreach (IMyShipWelder welder in welders) {
+            if (welder.DefinitionDisplayNameText == "BuildAndRepairSystem") {
+                buildAndRepair = welder;
+                break;
+            }
+        }
     }
+
+    updateBlockStatus = ENABLE_SHIELD_OUTPUT_FEATURE || ENBALE_BAR_STATUS_FEATURE;
+
+    Runtime.UpdateFrequency = UpdateFrequency.Update1;
 }
 
 DateTime updateShieldAfter = DateTime.UtcNow;
@@ -149,11 +167,11 @@ public void Main() {
 
     DateTime now = DateTime.UtcNow;
 
-    if (ENABLE_SHIELD_OUTPUT_FEATURE && now > updateShieldAfter) {
+    if (updateBlockStatus && now > updateShieldAfter) {
         updateShieldAfter = now.AddSeconds(1);
-        bool statusChanged = UpdateShieldStatus();
+        bool statusChanged = UpdateBlockStatus();
         if (statusChanged) {
-            OutputLCD("Action: Updated Shield Status");
+            OutputLCD("Action: Updated Block Status");
         }
         return;
     }
@@ -189,21 +207,36 @@ public void Main() {
 
 string oldShieldStatus = "";
 string shieldStatus = "\n";
-private bool UpdateShieldStatus() {
+private bool UpdateBlockStatus() {
+    StringBuilder statusBuilder = new StringBuilder();
+
+    if (ENABLE_SHIELD_OUTPUT_FEATURE) {
+        UpdateShieldStatus(statusBuilder);
+    }
+
+    if (ENBALE_BAR_STATUS_FEATURE) {
+        UpdateBARStatus(statusBuilder);
+    }
+
+    shieldStatus = statusBuilder.ToString();
+    bool statusChanged = oldShieldStatus != shieldStatus;
+    oldShieldStatus = shieldStatus;
+    return statusChanged;
+}
+
+private void UpdateShieldStatus(StringBuilder statusBuilder) {
     if (shieldModulator == null) {
-        shieldStatus = "Shield modulator not found\n\n";
-        return false;
+        statusBuilder.Append("Shield modulator not found\n");
+        return;
     }
 
     if (shieldController == null) {
-        shieldStatus = "Shield controller not found\n\n";
-        return false;
+        statusBuilder.Append("Shield controller not found\n");
+        return;
     }
 
     bool entitiesMayPass = shieldModulator.GetValue<bool>("DS-M_ModulateGrids");
     bool shieldFortified = shieldController.GetValue<Boolean>("DS-C_ShieldFortify");
-
-    StringBuilder statusBuilder = new StringBuilder();
 
     if (!entitiesMayPass && !shieldFortified) {
         statusBuilder.Append("Shield: Normal\n");
@@ -216,11 +249,19 @@ private bool UpdateShieldStatus() {
     }
 
     statusBuilder.Append($"{GetShieldPercent()} {GetShieldCharge()}\n");
+}
 
-    shieldStatus = statusBuilder.ToString();
-    bool statusChanged = oldShieldStatus != shieldStatus;
-    oldShieldStatus = shieldStatus;
-    return statusChanged;
+private void UpdateBARStatus(StringBuilder statusBuilder) {
+    if (buildAndRepair == null) {
+        statusBuilder.Append("BAR: Not found\n");
+        return;
+    }
+
+    if (buildAndRepair.Enabled) {
+        statusBuilder.Append("BAR: On\n");
+    } else {
+        statusBuilder.Append("BAR: Off\n");
+    }
 }
 
 string GetShieldPercent() {
@@ -275,7 +316,8 @@ private bool PlayerLeftCockpit() {
 
 private void TurnOffWelders() {
     List<IMyShipWelder> welders = new List<IMyShipWelder>();
-    GridTerminalSystem.GetBlocksOfType(welders, welder => welder.IsSameConstructAs(Me));
+    GridTerminalSystem.GetBlocksOfType(welders,
+        welder => welder.IsSameConstructAs(Me) && welder != buildAndRepair);
     foreach (IMyShipWelder welder in welders) {
         welder.Enabled = false;
     }
