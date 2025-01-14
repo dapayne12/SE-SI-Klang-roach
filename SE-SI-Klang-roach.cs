@@ -78,6 +78,17 @@ static readonly bool ENABLE_JUMP_DRIVE_ENABLER_FEATURE = true;
 // script will attepmt to turn on the jump drives.
 static readonly int ENABLE_JUMP_DRIVE_INTERVAL_SECONDS = 60;
 
+// Enable colours for HUD LCD (will look ugly on non-HUD LCDs)
+static readonly bool ENABLE_HUD_LCD_COLOURS = true;
+
+static readonly Color DEFAULT_COLOUR = Color.Green;
+
+// The amount of shield in millions when the colour should change to yellow.
+static readonly double SHIELD_WARNING = 40;
+
+// The amount of shield in millions when the colour should change to red.
+static readonly double SHIELD_CRITICAL = 20;
+
 /////////////////////////////////////////////////////
 // End of configuration, no changes past this point.
 /////////////////////////////////////////////////////
@@ -283,12 +294,12 @@ private bool UpdateBlockStatus() {
 
 private void UpdateShieldStatus(StringBuilder statusBuilder) {
     if (shieldModulator == null) {
-        statusBuilder.Append("Shield modulator not found\n");
+        statusBuilder.Append(ColourText("Shield modulator not found\n", Color.Red));
         return;
     }
 
     if (shieldController == null) {
-        statusBuilder.Append("Shield controller not found\n");
+        statusBuilder.Append(ColourText("Shield controller not found\n", Color.Red));
         return;
     }
 
@@ -296,13 +307,13 @@ private void UpdateShieldStatus(StringBuilder statusBuilder) {
     bool shieldFortified = shieldController.GetValue<Boolean>("DS-C_ShieldFortify");
 
     if (!entitiesMayPass && !shieldFortified) {
-        statusBuilder.Append("Shield: Normal\n");
+        statusBuilder.Append(ColourText("Shield: Normal\n", Color.Green));
     } else if (entitiesMayPass && !shieldFortified) {
-        statusBuilder.Append("Shield: Entities may pass\n");
+        statusBuilder.Append(ColourText("Shield: Entities may pass\n", Color.Yellow));
     } else if (!entitiesMayPass && shieldFortified) {
-        statusBuilder.Append("Shield: Fortified\n");
+        statusBuilder.Append(ColourText("Shield: Fortified\n", Color.Yellow));
     } else {
-        statusBuilder.Append("Shield: Fortified, Entities may pass\n");
+        statusBuilder.Append(ColourText("Shield: Fortified, Entities may pass\n", Color.Yellow));
     }
 
     statusBuilder.Append($"{GetShieldPercent()} {GetShieldCharge()}\n");
@@ -310,22 +321,22 @@ private void UpdateShieldStatus(StringBuilder statusBuilder) {
 
 private void UpdateBARStatus(StringBuilder statusBuilder) {
     if (buildAndRepair == null) {
-        statusBuilder.Append("BAR: Not found\n");
+        statusBuilder.Append(ColourText("BAR: Not found\n", Color.Red));
         return;
     }
 
     if (buildAndRepair.Enabled) {
-        statusBuilder.Append("BAR: On\n");
+        statusBuilder.Append(ColourText("BAR: On\n", Color.Green));
     } else {
-        statusBuilder.Append("BAR: Off\n");
+        statusBuilder.Append(ColourText("BAR: Off\n", Color.Red));
     }
 }
 
 private void UpdateWelderStatus(StringBuilder statusBuilder) {
     if (welders.Any(welder => welder.Enabled)) {
-        statusBuilder.Append("Welders: On\n");
+        statusBuilder.Append(ColourText("Welders: On\n", Color.Red));
     } else {
-        statusBuilder.Append("Welders: Off\n");
+        statusBuilder.Append(ColourText("Welders: Off\n", Color.Green));
     }
 }
 
@@ -343,11 +354,11 @@ private void UpdateProjectorStatus(StringBuilder statusBuilder) {
     }
 
     if (isProjecting) {
-        statusBuilder.Append("Projector: Projecting\n");
+        statusBuilder.Append(ColourText("Projector: Projecting\n", Color.Green));
     } else if (projectorOn) {
-        statusBuilder.Append("Projector: Not projecting\n");
+        statusBuilder.Append(ColourText("Projector: Not projecting\n", Color.Red));
     } else {
-        statusBuilder.Append("Projector: Off\n");
+        statusBuilder.Append(ColourText("Projector: Off\n", Color.Red));
     }
 }
 
@@ -356,7 +367,7 @@ private void UpdateJumpDriveStatus(StringBuilder statusBuilder) {
     int jumpDriveCount = jumpDrives.Count;
 
     if (jumpDriveCount == 0) {
-        statusBuilder.Append("No jump drives found\n");
+        statusBuilder.Append(ColourText("No jump drives found\n", Color.Red));
         return;
     }
 
@@ -367,39 +378,58 @@ private void UpdateJumpDriveStatus(StringBuilder statusBuilder) {
     }
 
     if (jumpDrivesEnabled == jumpDriveCount) {
-        statusBuilder.Append("Jump drives: Enabled\n");
+        statusBuilder.Append(ColourText("Jump drives: Enabled\n", Color.Green));
     } else if (jumpDrivesEnabled == 0) {
-        statusBuilder.Append("Jump drives: Disabled\n");
+        statusBuilder.Append(ColourText("Jump drives: Disabled\n", Color.Red));
     } else {
-        statusBuilder.Append($"Jump drives: {jumpDrivesEnabled}/{jumpDriveCount}");
+        statusBuilder.Append(ColourText($"Jump drives: {jumpDrivesEnabled}/{jumpDriveCount}", Color.Yellow));
     }
 }
 
 string GetShieldPercent() {
     if (getShieldPercent == null || shieldController == null) {
-        return "Failed to get shield percent\n";
+        return ColourText("Failed to get shield percent\n", Color.Red);
     }
 
     float? shieldPercent = getShieldPercent?.Invoke(shieldController);
 
     if (shieldPercent == null) {
-        return "N/A";
+        return ColourText("N/A", Color.Red);
     } else {
-        return $"{Math.Round((double)shieldPercent, 1)}%";
+        Color colour;
+        if (shieldPercent > 90) {
+            colour = Color.Green;
+        } else if (shieldPercent > 50) {
+            colour = Color.Yellow;
+        } else {
+            colour = Color.Red;
+        }
+        return ColourText($"{Math.Round((double)shieldPercent, 1)}%", colour);
     }
 }
 
 string GetShieldCharge() {
     if (getShieldPercent == null || shieldController == null) {
-        return "Failed to get shield charge\n";
+        return ColourText("Failed to get shield charge\n", Color.Red);
     }
 
     float? shieldCharge = getShieldCharge?.Invoke(shieldController);
 
     if (shieldCharge == null) {
-        return "N/A";
+        return ColourText("N/A", Color.Red);
     } else {
-        return FormatNumber((double)shieldCharge * 100);
+        double convertedShieldCharge = (double)shieldCharge * 100;
+
+        Color colour;
+        if (convertedShieldCharge < SHIELD_CRITICAL) {
+            colour = Color.Red;
+        } else if (convertedShieldCharge < SHIELD_WARNING) {
+            colour = Color.Yellow;
+        } else {
+            colour = Color.Green;
+        }
+
+        return ColourText(FormatNumber(convertedShieldCharge), colour);
     }
 }
 
@@ -516,7 +546,13 @@ private bool PlayerUnowned(IMyFunctionalBlock block) {
 
 private void OutputLCD(string actionPerformed) {
     if (outputPanel != null) {
-        StringBuilder lcdOutput = new StringBuilder($"{DateTime.UtcNow}\n");
+        StringBuilder lcdOutput = new StringBuilder();;
+
+        if (ENABLE_HUD_LCD_COLOURS) {
+            lcdOutput.Append(GetColourCode(DEFAULT_COLOUR));
+        }
+
+        lcdOutput.Append($"{DateTime.UtcNow}\n");
 
         if (actionPerformed != null) {
             lcdOutput.Append($"{actionPerformed}\n");
@@ -535,14 +571,6 @@ private void OutputLCD(string actionPerformed) {
             lcdOutput.Append("\n");
         }
 
-        if (ENABLE_SAFE_WELDER_FEATURE) {
-            if (lastPlayerInCockpit) {
-                lcdOutput.Append("In cockpit\n");
-            } else {
-                lcdOutput.Append("Out of cockpit\n");
-            }
-        }
-
         if (ENABLE_SHIELD_OUTPUT_FEATURE) {
             lcdOutput.Append(shieldStatus);
         }
@@ -557,6 +585,18 @@ private void TurnOnJumpDrives() {
             jumpDrive.Enabled = true;
         }
     }
+}
+
+private string ColourText(string text, Color colour) {
+    if (ENABLE_HUD_LCD_COLOURS) {
+        return $"{GetColourCode(colour)}{text}{GetColourCode(DEFAULT_COLOUR)}";
+    } else {
+        return text;
+    }
+}
+
+private string GetColourCode(Color colour) {
+    return $"<color={colour.R},{colour.G},{colour.B},{colour.A}>";
 }
 
 private string FormatNumber(double number) {
