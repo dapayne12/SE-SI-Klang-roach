@@ -70,6 +70,14 @@ static readonly bool ENABLE_WELDER_STATUS_FEATURE = true;
 // LCD.
 static readonly bool ENABLE_PROJECTOR_STATUS_FEATURE = true;
 
+// If your jump drives are off, this feature will attempt to turn them on once
+// per minute.
+static readonly bool ENABLE_JUMP_DRIVE_ENABLER_FEATURE = true;
+
+// If ENABLE_JUMP_DRIVE_ENABLER_FEATURE is true, every this many seconds the
+// script will attepmt to turn on the jump drives.
+static readonly int ENABLE_JUMP_DRIVE_INTERVAL_SECONDS = 60;
+
 /////////////////////////////////////////////////////
 // End of configuration, no changes past this point.
 /////////////////////////////////////////////////////
@@ -105,6 +113,8 @@ IMyShipWelder buildAndRepair = null;
 List<IMyShipWelder> welders = new List<IMyShipWelder>();
 
 List<IMyProjector> projectors = new List<IMyProjector>();
+
+List<IMyJumpDrive> jumpDrives = new List<IMyJumpDrive>();
 
 bool updateBlockStatus = false;
 public Program() {
@@ -160,15 +170,22 @@ public Program() {
         GridTerminalSystem.GetBlocksOfType(projectors, projector => projector.IsSameConstructAs(Me));
     }
 
+    if (ENABLE_JUMP_DRIVE_ENABLER_FEATURE) {
+        GridTerminalSystem.GetBlocksOfType(jumpDrives, jumpDrive => jumpDrive.IsSameConstructAs(Me));
+    }
+
     updateBlockStatus = ENABLE_SHIELD_OUTPUT_FEATURE ||
         ENBALE_BAR_STATUS_FEATURE ||
         ENABLE_WELDER_STATUS_FEATURE ||
-        ENABLE_PROJECTOR_STATUS_FEATURE;
+        ENABLE_PROJECTOR_STATUS_FEATURE ||
+        ENABLE_JUMP_DRIVE_ENABLER_FEATURE;
 
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
 }
 
 DateTime updateShieldAfter = DateTime.UtcNow;
+
+DateTime turnOnJumpDrivesAfter = DateTime.UtcNow;
 
 private enum Operation {
     COUNT_TECH,
@@ -185,7 +202,15 @@ public void Main() {
         return;
     }
 
+
     DateTime now = DateTime.UtcNow;
+
+    if (ENABLE_JUMP_DRIVE_ENABLER_FEATURE && turnOnJumpDrivesAfter < now) {
+        turnOnJumpDrivesAfter = now.AddSeconds(ENABLE_JUMP_DRIVE_INTERVAL_SECONDS);
+        TurnOnJumpDrives();
+        OutputLCD("Action: Turned on jump drives");
+        return;
+    }
 
     if (updateBlockStatus && now > updateShieldAfter) {
         updateShieldAfter = now.AddSeconds(1);
@@ -244,6 +269,10 @@ private bool UpdateBlockStatus() {
 
     if (ENABLE_PROJECTOR_STATUS_FEATURE) {
         UpdateProjectorStatus(statusBuilder);
+    }
+
+    if (ENABLE_JUMP_DRIVE_ENABLER_FEATURE) {
+        UpdateJumpDriveStatus(statusBuilder);
     }
 
     shieldStatus = statusBuilder.ToString();
@@ -319,6 +348,30 @@ private void UpdateProjectorStatus(StringBuilder statusBuilder) {
         statusBuilder.Append("Projector: Not projecting\n");
     } else {
         statusBuilder.Append("Projector: Off\n");
+    }
+}
+
+private void UpdateJumpDriveStatus(StringBuilder statusBuilder) {
+    int jumpDrivesEnabled = 0;
+    int jumpDriveCount = jumpDrives.Count;
+
+    if (jumpDriveCount == 0) {
+        statusBuilder.Append("No jump drives found\n");
+        return;
+    }
+
+    foreach (IMyJumpDrive jumpDrive in jumpDrives) {
+        if (jumpDrive.Enabled) {
+            ++jumpDrivesEnabled;
+        }
+    }
+
+    if (jumpDrivesEnabled == jumpDriveCount) {
+        statusBuilder.Append("Jump drives: Enabled\n");
+    } else if (jumpDrivesEnabled == 0) {
+        statusBuilder.Append("Jump drives: Disabled\n");
+    } else {
+        statusBuilder.Append($"Jump drives: {jumpDrivesEnabled}/{jumpDriveCount}");
     }
 }
 
@@ -495,6 +548,14 @@ private void OutputLCD(string actionPerformed) {
         }
 
         outputPanel.WriteText(lcdOutput);
+    }
+}
+
+private void TurnOnJumpDrives() {
+    foreach (IMyJumpDrive jumpDrive in jumpDrives) {
+        if (!jumpDrive.Enabled) {
+            jumpDrive.Enabled = true;
+        }
     }
 }
 
