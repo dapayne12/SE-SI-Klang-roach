@@ -506,14 +506,21 @@ private void CheckBlockOwnership() {
     bool grindersOn = false;
     List<IMyShipGrinder> offGrinders = new List<IMyShipGrinder>();
 
+    bool landingGearOn = false;
+    List<IMyLandingGear> offLandingGears = new List<IMyLandingGear>();
+
     foreach (IMyFunctionalBlock block in blocks) {
         if (block is IMyShipGrinder) {
             if (block.Enabled) {
                 grindersOn = true;
-            } else {
-                if (block.OwnerId == Me.OwnerId && block.IsFunctional) {
-                    offGrinders.Add((IMyShipGrinder)block);
-                }
+            } else if (block.OwnerId == Me.OwnerId && block.IsFunctional) {
+                offGrinders.Add((IMyShipGrinder)block);
+            }
+        } else if (block is IMyLandingGear) {
+            if (block.Enabled) {
+                landingGearOn = true;
+            } else if (block.IsFunctional) {
+                offLandingGears.Add((IMyLandingGear)block);
             }
         }
 
@@ -533,10 +540,16 @@ private void CheckBlockOwnership() {
             offGrinder.Enabled = true;
         }
     }
+
+    if (landingGearOn) {
+        foreach (IMyLandingGear landingGear in offLandingGears) {
+            landingGear.Enabled = true;
+        }
+    }
 }
 
 private bool PlayerUnowned(IMyFunctionalBlock block) {
-    if (block is IMyLandingGear || block is IMyShipGrinder) {
+    if (block is IMyShipGrinder) {
         if (block.OwnerId != Me.OwnerId) {
             return true;
         }
