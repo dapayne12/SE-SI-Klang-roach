@@ -89,6 +89,9 @@ static readonly double SHIELD_WARNING = 40;
 // The amount of shield in millions when the colour should change to red.
 static readonly double SHIELD_CRITICAL = 20;
 
+// Automatically turn on any lights that are turned off.
+static readonly bool ENABLE_TURN_ON_LIGHTS = true;
+
 /////////////////////////////////////////////////////
 // End of configuration, no changes past this point.
 /////////////////////////////////////////////////////
@@ -522,6 +525,8 @@ private void CheckBlockOwnership() {
             } else if (block.IsFunctional) {
                 offLandingGears.Add((IMyLandingGear)block);
             }
+        } else if (ENABLE_TURN_ON_LIGHTS && block is IMyLightingBlock && block.IsFunctional && !block.Enabled) {
+            block.Enabled = true;
         }
 
         if (PlayerUnowned(block)) {
