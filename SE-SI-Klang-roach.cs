@@ -92,6 +92,10 @@ static readonly double SHIELD_CRITICAL = 20;
 // Automatically turn on any lights that are turned off.
 static readonly bool ENABLE_TURN_ON_LIGHTS = true;
 
+// Set to true if you want the scirpt to report on your current broadcast
+// range.
+static readonly bool ENABLE_BROADCAST_RANGE_REPORT = true;
+
 /////////////////////////////////////////////////////
 // End of configuration, no changes past this point.
 /////////////////////////////////////////////////////
@@ -129,6 +133,9 @@ List<IMyShipWelder> welders = new List<IMyShipWelder>();
 List<IMyProjector> projectors = new List<IMyProjector>();
 
 List<IMyJumpDrive> jumpDrives = new List<IMyJumpDrive>();
+
+List<IMyRadioAntenna> antennas = new List<IMyRadioAntenna>();
+List<IMyBeacon> beacons = new List<IMyBeacon>();
 
 bool updateBlockStatus = false;
 public Program() {
@@ -188,11 +195,17 @@ public Program() {
         GridTerminalSystem.GetBlocksOfType(jumpDrives, jumpDrive => jumpDrive.IsSameConstructAs(Me));
     }
 
+    if (ENABLE_BROADCAST_RANGE_REPORT) {
+        GridTerminalSystem.GetBlocksOfType(antennas, antenna => antenna.IsSameConstructAs(Me));
+        GridTerminalSystem.GetBlocksOfType(beacons, beacon => beacon.IsSameConstructAs(Me));
+    }
+
     updateBlockStatus = ENABLE_SHIELD_OUTPUT_FEATURE ||
         ENBALE_BAR_STATUS_FEATURE ||
         ENABLE_WELDER_STATUS_FEATURE ||
         ENABLE_PROJECTOR_STATUS_FEATURE ||
-        ENABLE_JUMP_DRIVE_ENABLER_FEATURE;
+        ENABLE_JUMP_DRIVE_ENABLER_FEATURE ||
+        ENABLE_BROADCAST_RANGE_REPORT;
 
     Runtime.UpdateFrequency = UpdateFrequency.Update1;
 }
@@ -287,6 +300,10 @@ private bool UpdateBlockStatus() {
 
     if (ENABLE_JUMP_DRIVE_ENABLER_FEATURE) {
         UpdateJumpDriveStatus(statusBuilder);
+    }
+
+    if (ENABLE_BLOCK_OWNERSHIP_FEATURE) {
+        UpdateBroadcastRange(statusBuilder);
     }
 
     shieldStatus = statusBuilder.ToString();
@@ -386,6 +403,37 @@ private void UpdateJumpDriveStatus(StringBuilder statusBuilder) {
         statusBuilder.Append(ColourText("Jump drives: Disabled\n", Color.Red));
     } else {
         statusBuilder.Append(ColourText($"Jump drives: {jumpDrivesEnabled}/{jumpDriveCount}", Color.Yellow));
+    }
+}
+
+private void UpdateBroadcastRange(StringBuilder statusBuilder) {
+    float broadcastRange = -1;
+
+    foreach (IMyBeacon beacon in beacons) {
+        if (beacon.Enabled && beacon.Radius > broadcastRange) {
+            broadcastRange = beacon.Radius;
+        }
+    }
+
+    foreach (IMyRadioAntenna antenna in antennas) {
+        if (antenna.Enabled && antenna.IsBroadcasting && antenna.Radius > broadcastRange) {
+            broadcastRange = antenna.Radius;
+        }
+    }
+
+    if (broadcastRange < 0) {
+        statusBuilder.Append(ColourText("Not broadcasting\n", Color.Green));
+    } else {
+        int broadcastRangeKm = (int)Math.Round(broadcastRange / 1000);
+
+        Color colour;
+        if (broadcastRangeKm <= 7) {
+            colour = Color.Yellow;
+        } else {
+            colour = Color.Red;
+        }
+
+        statusBuilder.Append(ColourText($"Broadcast range: {broadcastRangeKm}KM\n", colour));
     }
 }
 
